@@ -426,21 +426,30 @@ def create_network_visualization(network, selected_authors):
 # MAIN APPLICATION
 # ============================
 def main():
-    # Header
+    # Streamlit Headers
     st.markdown('<div class="main-header">📚 Reviewer Recommendation System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">AI-Powered Paper Review Matching with Co-Author Network Analysis</div>', unsafe_allow_html=True)
-    
-    # Initialize data on first load
-    if 'data_loaded' not in st.session_state:
-        if os.path.exists(CSV_PATH):
-            with st.spinner(f"⏳ Loading data from {CSV_PATH} and initializing models..."):
+
+    # Ask user for base directory input
+    base_dir = st.text_input(
+        "📁 Enter the path to your folder containing all text files:",
+        value=r"D:\applied_ai\Assignment-2\Dataset\All_Cleaned_Texts"
+    )
+
+    # Load data only once
+    if 'data_loaded' not in st.session_state and st.button("🚀 Load Corpus"):
+        if os.path.exists(base_dir):
+            with st.spinner(f"⏳ Loading text files from: {base_dir} and initializing models..."):
                 try:
+                    # Load data directly from text files
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
-                        load_corpus_from_csv(CSV_PATH)
-                    
-                    if unique_authors is None:
+                        load_corpus_with_multi_authorship(base_dir)
+
+                    if not papers:
+                        st.error("❌ No papers found. Please check the folder path or text file format.")
                         st.stop()
-                        
+
+                    # Store in session state
                     st.session_state.data_loaded = True
                     st.session_state.unique_authors = unique_authors
                     st.session_state.corpus_texts = corpus_texts
@@ -449,25 +458,27 @@ def main():
                     st.session_state.network = network
                     st.session_state.use_coauthor_boost = True
                     st.session_state.coauthor_weight = 0.2
-                    
+
                     # Initialize recommender
                     recommender = MultiAuthorshipRecommender(
                         unique_authors, corpus_texts, author_paper_map, papers, network,
                         use_coauthor_boost=True, coauthor_weight=0.2
                     )
                     st.session_state.recommender = recommender
-                    
+
                     st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
                     st.rerun()
+
                 except Exception as e:
-                    st.error(f"❌ Error processing CSV data or initializing models: {e}")
+                    st.error(f"❌ Error processing text files or initializing models: {e}")
                     import traceback
                     st.code(traceback.format_exc())
                     st.stop()
         else:
-            st.error(f"❌ Corpus CSV file not found at: {CSV_PATH}")
-            st.info("💡 Please ensure the CSV file is present and update the CSV_PATH variable if necessary.")
+            st.error(f"❌ The specified folder path does not exist:\n{base_dir}")
+            st.info("💡 Please check and enter the correct directory path containing your text files.")
             st.stop()
+
     
     # Display statistics
     col1, col2, col3 = st.columns(3)
@@ -674,5 +685,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
