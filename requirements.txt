@@ -1,0 +1,9 @@
+nltk
+pymupdf
+scikit-learn 
+joblib
+numpy 
+pandas
+matplotlib
+sentence_transformers
+gensim
