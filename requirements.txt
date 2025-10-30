@@ -1,8 +1,8 @@
 streamlit
-torch
-pymupdf
-numpy
 pandas
+numpy
 scikit-learn
 sentence-transformers
+torch
+pymupdf
 spacy
