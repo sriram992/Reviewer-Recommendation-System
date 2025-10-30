@@ -100,7 +100,7 @@ st.markdown("""
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 # 🚨 UPDATED PATH: CSV file path
-CSV_PATH = "folder/."
+base_dir = "folder/"
 
 # ============================
 # CO-AUTHOR EXTRACTION
@@ -433,7 +433,7 @@ def main():
     # Ask user for base directory input
     base_dir = st.text_input(
         "📁 Enter the path to your folder containing all text files:",
-        value=r"D:\applied_ai\Assignment-2\Dataset\All_Cleaned_Texts"
+        value=r"folder/"
     )
 
     # Load data only once
@@ -685,6 +685,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
