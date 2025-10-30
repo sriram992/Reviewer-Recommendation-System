@@ -228,6 +228,24 @@ class MultiAuthorshipRecommender:
         df.insert(0, 'Rank', range(1, len(df)+1))
         return df.round(4)
 
+    def recommend(self, text, paper_authors=None, top_k=5, method='both', exclude_authors=None):
+        results = {}
+    
+        if method in ('tfidf', 'both'):
+            tfidf_df = self._recommend_engine(text, is_sbert=False, paper_authors=paper_authors, top_k=top_k * 2)
+            if exclude_authors and not tfidf_df.empty:
+                tfidf_df = tfidf_df[~tfidf_df['Author'].isin(exclude_authors)]
+            results['tfidf'] = tfidf_df.head(top_k)
+    
+        if method in ('sbert', 'both'):
+            sbert_df = self._recommend_engine(text, is_sbert=True, paper_authors=paper_authors, top_k=top_k * 2)
+            if exclude_authors and not sbert_df.empty:
+                sbert_df = sbert_df[~sbert_df['Author'].isin(exclude_authors)]
+            results['sbert'] = sbert_df.head(top_k)
+    
+        return results
+
+
 
 # ============================
 # HELPER
@@ -415,4 +433,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
