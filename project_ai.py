@@ -10,7 +10,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 import warnings
-import ast # NEW IMPORT for safely evaluating author list strings
 warnings.filterwarnings('ignore')
 
 # ============================
@@ -23,10 +22,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS (Same as before)
+# Custom CSS
 st.markdown("""
 <style>
-    /* ... (CSS styles omitted for brevity, but should remain in your file) ... */
 [data-testid="stSidebar"] {
     display: none;
 }
@@ -101,12 +99,11 @@ st.markdown("""
 # ============================
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-# 🚨 UPDATED PATH: Assumes your Excel file is named corpus_data.xlsx 
-# and is in the same directory as this script. Change the path/filename if needed.
-EXCEL_PATH = "D:\applied_ai\Assignment-2\corpus_index.csv"
+# 🚨 UPDATED PATH: CSV file path
+CSV_PATH = "folder/corpus_index.csv"
+
 # ============================
 # CO-AUTHOR EXTRACTION
-# ... (CoAuthorExtractor class remains unchanged for PDF processing) ...
 # ============================
 class CoAuthorExtractor:
     """Extract author names from paper text."""
@@ -114,7 +111,6 @@ class CoAuthorExtractor:
     def __init__(self):
         try:
             import spacy
-            # Ensure 'en_core_web_sm' is downloaded: python -m spacy download en_core_web_sm
             self.nlp = spacy.load("en_core_web_sm")
         except:
             self.nlp = None
@@ -162,7 +158,6 @@ class CoAuthorExtractor:
 
 # ============================
 # CO-AUTHORSHIP NETWORK
-# ... (CoAuthorshipNetwork class remains unchanged) ...
 # ============================
 class CoAuthorshipNetwork:
     """Build and query co-authorship network."""
@@ -196,73 +191,100 @@ class CoAuthorshipNetwork:
         return count
 
 # ============================
-# DATA LOADING (UPDATED TO USE EXCEL)
+# DATA LOADING FROM CSV
 # ============================
 @st.cache_resource
-def load_corpus_from_excel(excel_path):
-    """Load all papers from Excel and create necessary data structures."""
+def load_corpus_from_csv(csv_path):
+    """Load all papers from CSV and create necessary data structures."""
     
     network = CoAuthorshipNetwork()
     papers = []
     author_paper_map = defaultdict(list)
     all_authors = set()
     
-    if not os.path.exists(excel_path):
-        st.error(f"❌ Error: Corpus file not found at: {excel_path}")
+    if not os.path.exists(csv_path):
+        st.error(f"❌ Error: Corpus file not found at: {csv_path}")
         return None, None, None, None, None
     
     try:
-        # Read the Excel file (supports .xls and .xlsx)
-        df = pd.read_excel(excel_path)
+        # Read the CSV file
+        df = pd.read_csv(csv_path)
     except Exception as e:
-        st.error(f"❌ Error reading Excel file: {e}. Check file format and dependencies.")
+        st.error(f"❌ Error reading CSV file: {e}")
         return None, None, None, None, None
 
     # Ensure required columns exist
-    required_cols = ['text_content', 'paper_id', 'authors']
+    required_cols = ['text_content', 'paper_id', 'folder_owner']
     if not all(col in df.columns for col in required_cols):
-        st.error(f"❌ Excel file must contain columns: {required_cols}")
+        st.error(f"❌ CSV file must contain columns: {required_cols}")
+        st.info(f"Found columns: {list(df.columns)}")
         return None, None, None, None, None
 
+    # Initialize CoAuthorExtractor for extracting authors from text
+    extractor = CoAuthorExtractor()
+    
     for paper_idx, row in df.iterrows():
         try:
             text = row['text_content']
             paper_id = str(row['paper_id'])
+            folder_owner = str(row['folder_owner']).strip()
             
-            # Use ast.literal_eval to safely convert the string list back to a Python list
-            # Assumes the 'authors' column looks like: "['Author A', 'Author B']"
-            authors_list = ast.literal_eval(row['authors'])
+            # Skip if text is missing or empty
+            if pd.isna(text) or not str(text).strip():
+                continue
             
-            if not isinstance(authors_list, list) or not text:
+            text = str(text)
+            
+            # Extract authors from the text content
+            # This will attempt to find author names in the paper text
+            extracted_authors = extractor.extract_authors(text)
+            
+            # Use folder_owner as primary author if no authors extracted
+            if not extracted_authors:
+                authors_list = [folder_owner] if folder_owner and folder_owner != 'nan' else []
+            else:
+                # Include folder_owner in the authors list if not already present
+                authors_list = extracted_authors.copy()
+                if folder_owner and folder_owner != 'nan' and folder_owner not in authors_list:
+                    authors_list.insert(0, folder_owner)
+            
+            # Skip papers with no authors
+            if not authors_list:
                 continue
 
             papers.append({
                 'text': text,
                 'paper_id': paper_id,
                 'authors': authors_list,
-                # 'folder_owner' is now implicitly the first author, or ignored
-                'folder_owner': authors_list[0] if authors_list else "Unknown"
+                'folder_owner': folder_owner
             })
             
+            # Add authors to mapping
             for author in authors_list:
                 author_paper_map[author].append(paper_idx)
                 all_authors.add(author)
             
+            # Add to network
             network.add_paper(paper_id, authors_list)
 
         except Exception as e:
-            st.warning(f"⚠️ Skipped row {paper_idx} due to data error (Authors column format?): {e}")
+            st.warning(f"⚠️ Skipped row {paper_idx} due to data error: {e}")
             continue
+
+    if not papers:
+        st.error("❌ No valid papers found in CSV file!")
+        return None, None, None, None, None
 
     corpus_texts = [p['text'] for p in papers]
     unique_authors = sorted(list(all_authors))
+    
+    st.info(f"📊 Loaded {len(papers)} papers with {len(unique_authors)} unique authors")
     
     return unique_authors, corpus_texts, author_paper_map, papers, network
 
 
 # ============================
-# RECOMMENDER SYSTEM (Remains unchanged)
-# ... (MultiAuthorshipRecommender class remains unchanged) ...
+# RECOMMENDER SYSTEM
 # ============================
 class MultiAuthorshipRecommender:
     """Recommender where ALL authors on a paper get full content credit."""
@@ -391,7 +413,7 @@ class MultiAuthorshipRecommender:
         return results
 
 # ============================
-# HELPER FUNCTIONS (Remains unchanged)
+# HELPER FUNCTIONS
 # ============================
 def extract_text_from_pdf(pdf_file):
     """Extract and clean text from PDF."""
@@ -423,7 +445,7 @@ def create_network_visualization(network, selected_authors):
     return network_text if network_text else None
 
 # ============================
-# MAIN APPLICATION (Updated to call Excel loading function)
+# MAIN APPLICATION
 # ============================
 def main():
     # Header
@@ -432,11 +454,11 @@ def main():
     
     # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        if os.path.exists(EXCEL_PATH): # Check for Excel file existence
-            with st.spinner(f"⏳ Loading data from {EXCEL_PATH} and initializing models..."):
+        if os.path.exists(CSV_PATH):
+            with st.spinner(f"⏳ Loading data from {CSV_PATH} and initializing models..."):
                 try:
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
-                        load_corpus_from_excel(EXCEL_PATH) # NEW LOADING FUNCTION
+                        load_corpus_from_csv(CSV_PATH)
                     
                     if unique_authors is None:
                         st.stop()
@@ -460,16 +482,15 @@ def main():
                     st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error processing Excel data or initializing models: {e}")
+                    st.error(f"❌ Error processing CSV data or initializing models: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
                     st.stop()
         else:
-            st.error(f"❌ Corpus Excel file not found at: {EXCEL_PATH}")
-            st.info("💡 Please ensure the Excel file is present and update the EXCEL_PATH variable if necessary. You may need to install the 'openpyxl' library: `pip install openpyxl`.")
+            st.error(f"❌ Corpus CSV file not found at: {CSV_PATH}")
+            st.info("💡 Please ensure the CSV file is present and update the CSV_PATH variable if necessary.")
             st.stop()
     
-    # Rest of the main function logic (Display statistics, Tabs) remains unchanged 
-    # as it references session state variables that are now loaded from Excel.
-
     # Display statistics
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -674,5 +695,4 @@ def main():
             st.metric("🤝 Max Collaborators", df['Collaborators'].max())
 
 if __name__ == "__main__":
-
     main()
