@@ -10,6 +10,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 import warnings
+import ast # NEW IMPORT for safely evaluating author list strings
 warnings.filterwarnings('ignore')
 
 # ============================
@@ -22,151 +23,76 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
+# Custom CSS (Same as before)
 st.markdown("""
 <style>
-    /* Hide sidebar completely */
-    [data-testid="stSidebar"] {
-        display: none;
-    }
-    
-    /* Main styling */
-    .main {
-        padding: 2rem 3rem;
-    }
-    
-    .main-header {
-        font-size: 2.8rem;
-        font-weight: 700;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 0.5rem;
-        letter-spacing: -0.5px;
-    }
-    
-    .sub-header {
-        font-size: 1.1rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 2.5rem;
-        font-weight: 400;
-    }
-    
-    /* Metric cards */
-    .metric-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 12px;
-        color: white;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin-bottom: 0.3rem;
-    }
-    
-    .metric-label {
-        font-size: 0.9rem;
-        opacity: 0.9;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 1rem;
-        background-color: #f8f9fa;
-        padding: 0.5rem;
-        border-radius: 10px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 3.5rem;
-        font-size: 1rem;
-        font-weight: 600;
-        border-radius: 8px;
-        padding: 0 2rem;
-    }
-    
-    .stTabs [data-baseweb="tab"][aria-selected="true"] {
-        background-color: #1f77b4;
-        color: white;
-    }
-    
-    /* Upload section */
-    .upload-section {
-        background-color: #f8f9fa;
-        padding: 2rem;
-        border-radius: 12px;
-        border: 2px dashed #dee2e6;
-        margin: 1.5rem 0;
-    }
-    
-    /* Results table */
-    .dataframe {
-        border-radius: 8px !important;
-    }
-    
-    /* Buttons */
-    .stButton button {
-        border-radius: 8px;
-        font-weight: 600;
-        padding: 0.6rem 2rem;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    
-    /* Info boxes */
-    .stAlert {
-        border-radius: 8px;
-        border-left: 4px solid;
-    }
-    
-    /* Section headers */
-    .section-header {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #333;
-        margin: 2rem 0 1rem 0;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid #e9ecef;
-    }
-    
-    /* Results card */
-    .results-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        margin: 1rem 0;
-    }
-    
-    /* Network info */
-    .network-info {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #1f77b4;
-        margin: 0.5rem 0;
-    }
-    
-    /* Search bar */
-    .stTextInput input {
-        border-radius: 8px;
-        border: 2px solid #e9ecef;
-    }
-    
-    .stTextInput input:focus {
-        border-color: #1f77b4;
-        box-shadow: 0 0 0 0.2rem rgba(31,119,180,0.25);
-    }
+    /* ... (CSS styles omitted for brevity, but should remain in your file) ... */
+[data-testid="stSidebar"] {
+    display: none;
+}
+.main-header {
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #1f77b4;
+    text-align: center;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.5px;
+}
+.sub-header {
+    font-size: 1.1rem;
+    color: #666;
+    text-align: center;
+    margin-bottom: 2.5rem;
+    font-weight: 400;
+}
+.metric-container {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1.5rem;
+    border-radius: 12px;
+    color: white;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+.metric-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
+.metric-label {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.stTabs [data-baseweb="tab-list"] {
+    gap: 1rem;
+    background-color: #f8f9fa;
+    padding: 0.5rem;
+    border-radius: 10px;
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    background-color: #1f77b4;
+    color: white;
+}
+.section-header {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #333;
+    margin: 2rem 0 1rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #e9ecef;
+}
+.network-info {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 4px solid #1f77b4;
+    margin: 0.5rem 0;
+}
+.stButton button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -175,10 +101,12 @@ st.markdown("""
 # ============================
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-BASE_DIR = r"D:\applied_ai\Assignment-2\dataset"  # Default dataset path
-
+# 🚨 UPDATED PATH: Assumes your Excel file is named corpus_data.xlsx 
+# and is in the same directory as this script. Change the path/filename if needed.
+EXCEL_PATH = "D:\applied_ai\Assignment-2\corpus_index.csv"
 # ============================
 # CO-AUTHOR EXTRACTION
+# ... (CoAuthorExtractor class remains unchanged for PDF processing) ...
 # ============================
 class CoAuthorExtractor:
     """Extract author names from paper text."""
@@ -186,6 +114,7 @@ class CoAuthorExtractor:
     def __init__(self):
         try:
             import spacy
+            # Ensure 'en_core_web_sm' is downloaded: python -m spacy download en_core_web_sm
             self.nlp = spacy.load("en_core_web_sm")
         except:
             self.nlp = None
@@ -233,6 +162,7 @@ class CoAuthorExtractor:
 
 # ============================
 # CO-AUTHORSHIP NETWORK
+# ... (CoAuthorshipNetwork class remains unchanged) ...
 # ============================
 class CoAuthorshipNetwork:
     """Build and query co-authorship network."""
@@ -266,72 +196,73 @@ class CoAuthorshipNetwork:
         return count
 
 # ============================
-# DATA LOADING
+# DATA LOADING (UPDATED TO USE EXCEL)
 # ============================
 @st.cache_resource
-def load_corpus_with_multi_authorship(base_dir):
-    """Load all papers and create author-to-paper mappings."""
+def load_corpus_from_excel(excel_path):
+    """Load all papers from Excel and create necessary data structures."""
     
-    extractor = CoAuthorExtractor()
     network = CoAuthorshipNetwork()
-    
     papers = []
     author_paper_map = defaultdict(list)
     all_authors = set()
-    folder_owners = set()
     
-    paper_idx = 0
+    if not os.path.exists(excel_path):
+        st.error(f"❌ Error: Corpus file not found at: {excel_path}")
+        return None, None, None, None, None
     
-    for author_folder in os.listdir(base_dir):
-        author_path = os.path.join(base_dir, author_folder)
-        cleaned_path = os.path.join(author_path, "Cleaned")
-        
-        if not os.path.isdir(author_path) or not os.path.exists(cleaned_path):
+    try:
+        # Read the Excel file (supports .xls and .xlsx)
+        df = pd.read_excel(excel_path)
+    except Exception as e:
+        st.error(f"❌ Error reading Excel file: {e}. Check file format and dependencies.")
+        return None, None, None, None, None
+
+    # Ensure required columns exist
+    required_cols = ['text_content', 'paper_id', 'authors']
+    if not all(col in df.columns for col in required_cols):
+        st.error(f"❌ Excel file must contain columns: {required_cols}")
+        return None, None, None, None, None
+
+    for paper_idx, row in df.iterrows():
+        try:
+            text = row['text_content']
+            paper_id = str(row['paper_id'])
+            
+            # Use ast.literal_eval to safely convert the string list back to a Python list
+            # Assumes the 'authors' column looks like: "['Author A', 'Author B']"
+            authors_list = ast.literal_eval(row['authors'])
+            
+            if not isinstance(authors_list, list) or not text:
+                continue
+
+            papers.append({
+                'text': text,
+                'paper_id': paper_id,
+                'authors': authors_list,
+                # 'folder_owner' is now implicitly the first author, or ignored
+                'folder_owner': authors_list[0] if authors_list else "Unknown"
+            })
+            
+            for author in authors_list:
+                author_paper_map[author].append(paper_idx)
+                all_authors.add(author)
+            
+            network.add_paper(paper_id, authors_list)
+
+        except Exception as e:
+            st.warning(f"⚠️ Skipped row {paper_idx} due to data error (Authors column format?): {e}")
             continue
-        
-        folder_owners.add(author_folder)
-        
-        for file in os.listdir(cleaned_path):
-            if file.endswith("_clean.txt"):
-                file_path = os.path.join(cleaned_path, file)
-                
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        text = f.read().strip()
-                    
-                    if not text:
-                        continue
-                    
-                    paper_authors = extractor.extract_authors(text)
-                    
-                    if author_folder not in paper_authors:
-                        paper_authors.insert(0, author_folder)
-                    
-                    paper_id = f"{author_folder}_{file}"
-                    papers.append({
-                        'text': text,
-                        'paper_id': paper_id,
-                        'authors': paper_authors,
-                        'folder_owner': author_folder
-                    })
-                    
-                    for author in paper_authors:
-                        author_paper_map[author].append(paper_idx)
-                        all_authors.add(author)
-                    
-                    network.add_paper(paper_id, paper_authors)
-                    paper_idx += 1
-                
-                except Exception as e:
-                    pass
-    
+
     corpus_texts = [p['text'] for p in papers]
     unique_authors = sorted(list(all_authors))
     
     return unique_authors, corpus_texts, author_paper_map, papers, network
 
+
 # ============================
-# RECOMMENDER SYSTEM
+# RECOMMENDER SYSTEM (Remains unchanged)
+# ... (MultiAuthorshipRecommender class remains unchanged) ...
 # ============================
 class MultiAuthorshipRecommender:
     """Recommender where ALL authors on a paper get full content credit."""
@@ -460,7 +391,7 @@ class MultiAuthorshipRecommender:
         return results
 
 # ============================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (Remains unchanged)
 # ============================
 def extract_text_from_pdf(pdf_file):
     """Extract and clean text from PDF."""
@@ -492,7 +423,7 @@ def create_network_visualization(network, selected_authors):
     return network_text if network_text else None
 
 # ============================
-# MAIN APPLICATION
+# MAIN APPLICATION (Updated to call Excel loading function)
 # ============================
 def main():
     # Header
@@ -501,12 +432,15 @@ def main():
     
     # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        if os.path.exists(BASE_DIR):
-            with st.spinner("⏳ Loading dataset and initializing models..."):
+        if os.path.exists(EXCEL_PATH): # Check for Excel file existence
+            with st.spinner(f"⏳ Loading data from {EXCEL_PATH} and initializing models..."):
                 try:
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
-                        load_corpus_with_multi_authorship(BASE_DIR)
+                        load_corpus_from_excel(EXCEL_PATH) # NEW LOADING FUNCTION
                     
+                    if unique_authors is None:
+                        st.stop()
+                        
                     st.session_state.data_loaded = True
                     st.session_state.unique_authors = unique_authors
                     st.session_state.corpus_texts = corpus_texts
@@ -526,13 +460,16 @@ def main():
                     st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error loading dataset: {e}")
+                    st.error(f"❌ Error processing Excel data or initializing models: {e}")
                     st.stop()
         else:
-            st.error(f"❌ Dataset not found at: {BASE_DIR}")
-            st.info("💡 Please update the BASE_DIR variable in the code to point to your dataset location.")
+            st.error(f"❌ Corpus Excel file not found at: {EXCEL_PATH}")
+            st.info("💡 Please ensure the Excel file is present and update the EXCEL_PATH variable if necessary. You may need to install the 'openpyxl' library: `pip install openpyxl`.")
             st.stop()
     
+    # Rest of the main function logic (Display statistics, Tabs) remains unchanged 
+    # as it references session state variables that are now loaded from Excel.
+
     # Display statistics
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -737,4 +674,5 @@ def main():
             st.metric("🤝 Max Collaborators", df['Collaborators'].max())
 
 if __name__ == "__main__":
+
     main()
