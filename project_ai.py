@@ -644,12 +644,10 @@ def main():
         
         # Statistics
         st.markdown("<br>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             st.metric("📊 Total Authors", len(df))
         with col2:
-            st.metric("📄 Avg Papers/Author", f"{df['Papers'].mean():.1f}")
-        with col3:
             st.metric("🤝 Avg Collaborators", f"{df['Collaborators'].mean():.1f}")
     
     # Tab 3: Analytics
@@ -696,3 +694,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
