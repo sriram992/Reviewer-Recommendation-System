@@ -280,24 +280,100 @@ def main():
     tab1, tab2, tab3 = st.tabs(["🧠 Find Reviewers", "👥 Author Pool", "📈 Analytics"])
 
     # TAB 1
+        # Tab 1: Recommend Reviewers
     with tab1:
-        st.markdown('<div class="section-header">🔍 Submit Paper for Reviewer Recommendation</div>', unsafe_allow_html=True)
-        upload_type = st.radio("Upload Type", ["📄 PDF File", "📝 Paste Text"], horizontal=True)
-        text = ""
-        if upload_type == "📄 PDF File":
-            pdf_file = st.file_uploader("Upload your research paper", type=["pdf"])
-            if pdf_file:
-                text = extract_text_from_pdf(pdf_file)
-        else:
-            text = st.text_area("Paste your paper text or abstract here:", height=200)
-        if st.button("Find Reviewers"):
-            if not text.strip():
-                st.warning("⚠️ Please provide paper text or upload a PDF.")
-            else:
-                recommender = st.session_state.recommender
-                results = recommender._recommend_engine(text, True, top_k=5)
-                st.markdown("### 🏆 Top Recommended Reviewers")
-                st.table(results)
+        st.markdown('<div class="section-header">📤 Upload Paper for Review</div>', unsafe_allow_html=True)
+        
+        uploaded_file = st.file_uploader("Drop your PDF file here or click to browse", type=['pdf'], label_visibility="collapsed")
+        
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            top_k = st.number_input("Number of Recommendations", min_value=1, max_value=20, value=5)
+        with col2:
+            exclude_authors = st.checkbox("Exclude Paper Authors", value=True)
+        with col3:
+            use_boost = st.checkbox("Enable Co-author Boost", value=True)
+        
+        if uploaded_file is not None:
+            if st.button("🚀 Generate Recommendations", type="primary", use_container_width=True):
+                with st.spinner("🔍 Analyzing paper and generating recommendations..."):
+                    # Extract text
+                    text = extract_text_from_pdf(uploaded_file)
+                    
+                    if not text:
+                        st.error("❌ Could not extract text from PDF! Please ensure the PDF is readable.")
+                        return
+                    
+                    # Extract authors
+                    extractor = CoAuthorExtractor()
+                    paper_authors = extractor.extract_authors(text)
+                    
+                    # Update boost setting
+                    st.session_state.recommender.use_coauthor_boost = use_boost
+                    
+                    # Show detected authors
+                    if paper_authors:
+                        st.success(f"**📝 Detected Authors:** {', '.join(paper_authors[:5])}")
+                        
+                        known = [a for a in paper_authors if a in st.session_state.unique_authors]
+                        new = [a for a in paper_authors if a not in st.session_state.unique_authors]
+                        
+                        col_info1, col_info2 = st.columns(2)
+                        with col_info1:
+                            if known:
+                                st.info(f"✅ {len(known)} author(s) found in corpus")
+                        with col_info2:
+                            if new:
+                                st.warning(f"🆕 {len(new)} new author(s) detected")
+                    
+                    # Get recommendations
+                    authors_to_exclude = paper_authors if exclude_authors else None
+                    results = st.session_state.recommender.recommend(
+                        text,
+                        paper_authors=paper_authors,
+                        top_k=top_k,
+                        method='both',
+                        exclude_authors=authors_to_exclude
+                    )
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown('<div class="section-header">🏆 Recommended Reviewers</div>', unsafe_allow_html=True)
+                    
+                    # Display results
+                    if results:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("### 📊 TF-IDF Based Rankings")
+                            if 'tfidf' in results:
+                                st.dataframe(
+                                    results['tfidf'], 
+                                    use_container_width=True, 
+                                    hide_index=True,
+                                    height=400
+                                )
+                        
+                        with col2:
+                            st.markdown("### 🤖 SBERT Based Rankings")
+                            if 'sbert' in results:
+                                st.dataframe(
+                                    results['sbert'], 
+                                    use_container_width=True, 
+                                    hide_index=True,
+                                    height=400
+                                )
+                        
+                        # Network visualization
+                        if use_boost and paper_authors:
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            st.markdown('<div class="section-header">🌐 Collaboration Network</div>', unsafe_allow_html=True)
+                            top_reviewers = results['sbert']['Author'].tolist()
+                            network_viz = create_network_visualization(st.session_state.network, top_reviewers)
+                            if network_viz:
+                                st.markdown(f'<div class="network-info">{network_viz}</div>', unsafe_allow_html=True)
+                            else:
+                                st.info("ℹ️ No collaboration data available for top recommended reviewers.")
+    
 
     # TAB 2
     with tab2:
@@ -339,3 +415,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
