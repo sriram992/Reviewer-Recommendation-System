@@ -325,98 +325,137 @@ def create_network_visualization(network, selected_authors):
 # MAIN APPLICATION
 # ============================
 def main():
+    # Header
     st.markdown('<div class="main-header">📚 Reviewer Recommendation System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">AI-Powered Paper Review Matching with Co-Author Network Analysis</div>', unsafe_allow_html=True)
 
-    base_dir = st.text_input("📁 Enter path to folder with text files:", value=r"folder/")
+    # Base dataset directory (change if needed)
+    BASE_DIR = r"folder/"
 
-    if 'data_loaded' not in st.session_state and st.button("🚀 Load Corpus"):
-        if os.path.exists(base_dir):
-            with st.spinner(f"⏳ Loading data from: {base_dir} ..."):
-                unique_authors, corpus_texts, author_paper_map, papers, network = load_corpus_with_multi_authorship(base_dir)
-                if not papers:
-                    st.error("❌ No valid papers found.")
-                    return
-
-                st.session_state.update({
-                    'data_loaded': True,
-                    'unique_authors': unique_authors,
-                    'corpus_texts': corpus_texts,
-                    'author_paper_map': author_paper_map,
-                    'papers': papers,
-                    'network': network,
-                    'use_coauthor_boost': True,
-                    'coauthor_weight': 0.2,
-                    'recommender': MultiAuthorshipRecommender(
-                        unique_authors, corpus_texts, author_paper_map, papers, network,
-                        use_coauthor_boost=True, coauthor_weight=0.2)
-                })
-                st.success(f"✅ Loaded {len(papers)} papers from {len(unique_authors)} authors.")
-                st.rerun()
-        else:
-            st.error(f"❌ Path does not exist: {base_dir}")
-            return
-
+    # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        st.info("💡 Please load the dataset first.")
-        return
+        if os.path.exists(BASE_DIR):
+            with st.spinner(f"⏳ Loading data from folder structure..."):
+                try:
+                    # Load all authors and papers directly from folders
+                    unique_authors, corpus_texts, author_paper_map, papers, network = \
+                        load_corpus_with_multi_authorship(BASE_DIR)
 
-    # Show metrics
-    col1, col2, col3 = st.columns(3)
-    col1.markdown(f"<div class='metric-container'><div class='metric-value'>{len(st.session_state.papers)}</div><div class='metric-label'>Total Papers</div></div>", unsafe_allow_html=True)
-    col2.markdown(f"<div class='metric-container'><div class='metric-value'>{len(st.session_state.unique_authors)}</div><div class='metric-label'>Total Authors</div></div>", unsafe_allow_html=True)
-    avg_authors = np.mean([len(p['authors']) for p in st.session_state.papers])
-    col3.markdown(f"<div class='metric-container'><div class='metric-value'>{avg_authors:.1f}</div><div class='metric-label'>Avg Authors/Paper</div></div>", unsafe_allow_html=True)
+                    if not papers:
+                        st.error("❌ No papers found. Check that the directory structure and text files are correct.")
+                        st.stop()
 
-    # Tabs
-    tab1, tab2, tab3 = st.tabs(["📄 Recommend Reviewers", "👥 Author Pool", "📈 Analytics"])
+                    # Save to session state
+                    st.session_state.data_loaded = True
+                    st.session_state.unique_authors = unique_authors
+                    st.session_state.corpus_texts = corpus_texts
+                    st.session_state.author_paper_map = author_paper_map
+                    st.session_state.papers = papers
+                    st.session_state.network = network
+                    st.session_state.use_coauthor_boost = True
+                    st.session_state.coauthor_weight = 0.2
 
-    # ============ TAB 1 ============
-    with tab1:
-        st.markdown('<div class="section-header">📤 Upload Paper for Review</div>', unsafe_allow_html=True)
-        uploaded_file = st.file_uploader("Drop PDF here", type=['pdf'])
-        col1, col2, col3 = st.columns([1, 1, 1])
-        top_k = col1.number_input("Top K", min_value=1, max_value=20, value=5)
-        exclude_authors = col2.checkbox("Exclude Paper Authors", value=True)
-        use_boost = col3.checkbox("Enable Co-author Boost", value=True)
+                    # Initialize recommender
+                    recommender = MultiAuthorshipRecommender(
+                        unique_authors, corpus_texts, author_paper_map, papers, network,
+                        use_coauthor_boost=True, coauthor_weight=0.2
+                    )
+                    st.session_state.recommender = recommender
 
-        if uploaded_file and st.button("🚀 Generate Recommendations", type="primary"):
-            text = extract_text_from_pdf(uploaded_file)
-            if not text:
-                st.error("❌ Could not extract text.")
-                return
+                    st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error processing folder data or initializing models: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+                    st.stop()
+        else:
+            st.error(f"❌ Dataset folder not found at: {BASE_DIR}")
+            st.info("💡 Please ensure the base dataset directory is correct.")
+            st.stop()
 
-            extractor = CoAuthorExtractor()
-            paper_authors = extractor.extract_authors(text)
-            st.session_state.recommender.use_coauthor_boost = use_boost
-
-            if paper_authors:
-                st.success(f"📝 Detected Authors: {', '.join(paper_authors[:5])}")
-
-            exclude = paper_authors if exclude_authors else None
-            results = st.session_state.recommender.recommend(text, paper_authors, top_k, 'both', exclude)
-
-            st.markdown('<div class="section-header">🏆 Recommended Reviewers</div>', unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
-            if results.get('tfidf') is not None:
-                col1.markdown("### 📊 TF-IDF Rankings")
-                col1.dataframe(results['tfidf'], use_container_width=True)
-            if results.get('sbert') is not None:
-                col2.markdown("### 🤖 SBERT Rankings")
-                col2.dataframe(results['sbert'], use_container_width=True)
-
-            if use_boost and paper_authors:
-                st.markdown('<div class="section-header">🌐 Collaboration Network</div>', unsafe_allow_html=True)
-                viz = create_network_visualization(st.session_state.network, results['sbert']['Author'].tolist())
-                if viz:
-                    st.markdown(f'<div class="network-info">{viz}</div>', unsafe_allow_html=True)
-                else:
-                    st.info("No collaboration data available.")
 
     # ============ TAB 2 ============
+    # Tab 2: Author Pool
     with tab2:
         st.markdown('<div class="section-header">👥 Reviewer Pool Overview</div>', unsafe_allow_html=True)
-        search = st.text_input("🔍 Search Author", "")
-        data = [
-            {'Author': a,
-             'Papers': len(st.session_state.author_paper_map.get(a, [])),
+        
+        # Search
+        search_query = st.text_input("🔍 Search authors by name", "", placeholder="Enter author name...")
+        
+        # Create DataFrame
+        author_data = []
+        for author in st.session_state.unique_authors:
+            paper_count = len(st.session_state.author_paper_map.get(author, []))
+            coauthor_count = len(st.session_state.network.get_coauthors(author))
+            author_data.append({
+                'Author': author,
+                'Papers': paper_count,
+                'Collaborators': coauthor_count
+            })
+        
+        df = pd.DataFrame(author_data)
+        
+        # Filter
+        if search_query:
+            df = df[df['Author'].str.contains(search_query, case=False)]
+        
+        # Display
+        st.dataframe(df, use_container_width=True, hide_index=True, height=500)
+        
+        # Statistics
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📊 Total Authors", len(df))
+        with col2:
+            st.metric("📄 Avg Papers/Author", f"{df['Papers'].mean():.1f}")
+        with col3:
+            st.metric("🤝 Avg Collaborators", f"{df['Collaborators'].mean():.1f}")
+    
+    # Tab 3: Analytics
+    with tab3:
+        st.markdown('<div class="section-header">📈 Dataset Analytics</div>', unsafe_allow_html=True)
+        
+        # Create analytics
+        author_data = []
+        for author in st.session_state.unique_authors:
+            paper_count = len(st.session_state.author_paper_map.get(author, []))
+            coauthor_count = len(st.session_state.network.get_coauthors(author))
+            author_data.append({
+                'Author': author,
+                'Papers': paper_count,
+                'Collaborators': coauthor_count
+            })
+        
+        df = pd.DataFrame(author_data)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 📊 Top 15 Most Prolific Authors")
+            top_authors = df.nlargest(15, 'Papers')[['Author', 'Papers']]
+            st.dataframe(top_authors, use_container_width=True, hide_index=True, height=500)
+        
+        with col2:
+            st.markdown("### 🌐 Top 15 Most Connected Authors")
+            top_collab = df.nlargest(15, 'Collaborators')[['Author', 'Collaborators']]
+            st.dataframe(top_collab, use_container_width=True, hide_index=True, height=500)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("📄 Total Papers", len(st.session_state.papers))
+        with col2:
+            st.metric("👥 Total Authors", len(df))
+        with col3:
+            st.metric("📊 Max Papers by Author", df['Papers'].max())
+        with col4:
+            st.metric("🤝 Max Collaborators", df['Collaborators'].max())
+
+if __name__ == "__main__":
+    main()
+
+
