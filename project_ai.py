@@ -100,7 +100,7 @@ st.markdown("""
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 # 🚨 UPDATED PATH: CSV file path
-CSV_PATH = "folder/corpus_index.csv"
+CSV_PATH = "folder/."
 
 # ============================
 # CO-AUTHOR EXTRACTION
@@ -194,93 +194,71 @@ class CoAuthorshipNetwork:
 # DATA LOADING FROM CSV
 # ============================
 @st.cache_resource
-def load_corpus_from_csv(csv_path):
-    """Load all papers from CSV and create necessary data structures."""
-    
+def load_corpus_with_multi_authorship(base_dir):
+    """
+    Load all text files directly from base_dir and create author-to-paper mappings.
+    Each file in base_dir is assumed to belong to an author based on its filename prefix
+    (e.g., "Amit Saxena_paper1_clean.txt" → author = "Amit Saxena").
+    """
+
+    extractor = CoAuthorExtractor()
     network = CoAuthorshipNetwork()
+
     papers = []
     author_paper_map = defaultdict(list)
     all_authors = set()
-    
-    if not os.path.exists(csv_path):
-        st.error(f"❌ Error: Corpus file not found at: {csv_path}")
-        return None, None, None, None, None
-    
-    try:
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-    except Exception as e:
-        st.error(f"❌ Error reading CSV file: {e}")
-        return None, None, None, None, None
 
-    # Ensure required columns exist
-    required_cols = ['text_content', 'paper_id', 'folder_owner']
-    if not all(col in df.columns for col in required_cols):
-        st.error(f"❌ CSV file must contain columns: {required_cols}")
-        st.info(f"Found columns: {list(df.columns)}")
-        return None, None, None, None, None
+    paper_idx = 0
 
-    # Initialize CoAuthorExtractor for extracting authors from text
-    extractor = CoAuthorExtractor()
-    
-    for paper_idx, row in df.iterrows():
-        try:
-            text = row['text_content']
-            paper_id = str(row['paper_id'])
-            folder_owner = str(row['folder_owner']).strip()
-            
-            # Skip if text is missing or empty
-            if pd.isna(text) or not str(text).strip():
-                continue
-            
-            text = str(text)
-            
-            # Extract authors from the text content
-            # This will attempt to find author names in the paper text
-            extracted_authors = extractor.extract_authors(text)
-            
-            # Use folder_owner as primary author if no authors extracted
-            if not extracted_authors:
-                authors_list = [folder_owner] if folder_owner and folder_owner != 'nan' else []
-            else:
-                # Include folder_owner in the authors list if not already present
-                authors_list = extracted_authors.copy()
-                if folder_owner and folder_owner != 'nan' and folder_owner not in authors_list:
-                    authors_list.insert(0, folder_owner)
-            
-            # Skip papers with no authors
-            if not authors_list:
-                continue
-
-            papers.append({
-                'text': text,
-                'paper_id': paper_id,
-                'authors': authors_list,
-                'folder_owner': folder_owner
-            })
-            
-            # Add authors to mapping
-            for author in authors_list:
-                author_paper_map[author].append(paper_idx)
-                all_authors.add(author)
-            
-            # Add to network
-            network.add_paper(paper_id, authors_list)
-
-        except Exception as e:
-            st.warning(f"⚠️ Skipped row {paper_idx} due to data error: {e}")
+    # Iterate through all text files in the base directory
+    for file in os.listdir(base_dir):
+        if not file.endswith(".txt"):
             continue
 
-    if not papers:
-        st.error("❌ No valid papers found in CSV file!")
-        return None, None, None, None, None
+        file_path = os.path.join(base_dir, file)
 
-    corpus_texts = [p['text'] for p in papers]
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+
+            if not text:
+                continue
+
+            # Try to infer author name from filename (before first underscore)
+            # Example: "Amit Saxena_paper1_clean.txt" → "Amit Saxena"
+            author_name = file.split("_")[0].strip()
+
+            # Extract additional co-authors from text using NER or regex
+            paper_authors = extractor.extract_authors(text)
+
+            # Ensure folder owner (inferred from filename) is included
+            if author_name not in paper_authors:
+                paper_authors.insert(0, author_name)
+
+            paper_id = file.replace(".txt", "")
+            papers.append({
+                "text": text,
+                "paper_id": paper_id,
+                "authors": paper_authors,
+                "folder_owner": author_name
+            })
+
+            # Update mappings
+            for author in paper_authors:
+                author_paper_map[author].append(paper_idx)
+                all_authors.add(author)
+
+            network.add_paper(paper_id, paper_authors)
+            paper_idx += 1
+
+        except Exception as e:
+            print(f"⚠️ Error reading {file_path}: {e}")
+
+    corpus_texts = [p["text"] for p in papers]
     unique_authors = sorted(list(all_authors))
-    
-    st.info(f"📊 Loaded {len(papers)} papers with {len(unique_authors)} unique authors")
-    
+
     return unique_authors, corpus_texts, author_paper_map, papers, network
+
 
 
 # ============================
@@ -696,4 +674,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
