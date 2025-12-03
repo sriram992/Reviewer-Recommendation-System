@@ -11,6 +11,10 @@ from sentence_transformers import SentenceTransformer
 import warnings
 warnings.filterwarnings('ignore')
 
+# Disable hf_transfer to avoid download issues
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
 # ============================
 # PAGE CONFIGURATION
 # ============================
@@ -320,7 +324,26 @@ class MultiAuthorshipRecommender:
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.corpus_texts)
         
         with st.spinner(f"🤖 Loading SBERT model ({SBERT_MODEL_NAME})..."):
-            self.sbert_model = SentenceTransformer(SBERT_MODEL_NAME, device=DEVICE)
+            try:
+                # Try loading with explicit trust_remote_code and local_files_only=False
+                self.sbert_model = SentenceTransformer(
+                    SBERT_MODEL_NAME, 
+                    device=DEVICE,
+                    cache_folder=None  # Use default cache
+                )
+            except Exception as e:
+                st.error(f"Failed to load SBERT model: {str(e)}")
+                st.info("💡 Trying alternative download method...")
+                try:
+                    # Alternative: specify full model path
+                    self.sbert_model = SentenceTransformer(
+                        f"sentence-transformers/{SBERT_MODEL_NAME}",
+                        device=DEVICE
+                    )
+                except Exception as e2:
+                    st.error(f"❌ Could not load model: {str(e2)}")
+                    st.error("Please check your internet connection and try again.")
+                    raise
         
         with st.spinner("📊 Encoding corpus with SBERT..."):
             self.sbert_embeddings = self.sbert_model.encode(
