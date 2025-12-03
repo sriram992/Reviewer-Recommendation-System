@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import re
 import torch
-import pymupdf
 import numpy as np
 import pandas as pd
 from collections import defaultdict
@@ -99,8 +98,21 @@ st.markdown("""
 # ============================
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-# 🚨 UPDATED PATH: CSV file path
-CSV_PATH = "folder/corpus_index.csv"
+
+# Try multiple possible paths for the data folder
+POSSIBLE_PATHS = [
+    "folder",  # Local development
+    "./folder",
+    "../folder",
+    "data/folder",  # Alternative structure
+]
+
+def find_data_folder():
+    """Find the data folder in various possible locations."""
+    for path in POSSIBLE_PATHS:
+        if os.path.exists(path) and os.path.isdir(path):
+            return path
+    return None
 
 # ============================
 # CO-AUTHOR EXTRACTION
@@ -191,64 +203,56 @@ class CoAuthorshipNetwork:
         return count
 
 # ============================
-# DATA LOADING FROM CSV
+# DATA LOADING FROM TEXT FILES
 # ============================
 @st.cache_resource
-def load_corpus_from_csv(csv_path):
-    """Load all papers from CSV and create necessary data structures."""
+def load_corpus_from_folder(folder_path):
+    """Load all papers from text files in the folder."""
     
     network = CoAuthorshipNetwork()
     papers = []
     author_paper_map = defaultdict(list)
     all_authors = set()
     
-    if not os.path.exists(csv_path):
-        st.error(f"❌ Error: Corpus file not found at: {csv_path}")
+    if not os.path.exists(folder_path):
+        st.error(f"❌ Error: Data folder not found at: {folder_path}")
         return None, None, None, None, None
     
-    try:
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-    except Exception as e:
-        st.error(f"❌ Error reading CSV file: {e}")
+    # Get all .txt files
+    txt_files = [f for f in os.listdir(folder_path) if f.endswith('_clean.txt')]
+    
+    if not txt_files:
+        st.error(f"❌ No text files found in: {folder_path}")
         return None, None, None, None, None
-
-    # Ensure required columns exist
-    required_cols = ['text_content', 'paper_id', 'folder_owner']
-    if not all(col in df.columns for col in required_cols):
-        st.error(f"❌ CSV file must contain columns: {required_cols}")
-        st.info(f"Found columns: {list(df.columns)}")
-        return None, None, None, None, None
-
-    # Initialize CoAuthorExtractor for extracting authors from text
+    
     extractor = CoAuthorExtractor()
     
-    for paper_idx, row in df.iterrows():
+    for idx, filename in enumerate(txt_files):
         try:
-            text = row['text_content']
-            paper_id = str(row['paper_id'])
-            folder_owner = str(row['folder_owner']).strip()
+            file_path = os.path.join(folder_path, filename)
             
-            # Skip if text is missing or empty
-            if pd.isna(text) or not str(text).strip():
+            # Extract author name from filename (format: "AuthorName_PaperTitle_clean.txt")
+            folder_owner = filename.split('_')[0].strip()
+            paper_id = filename.replace('_clean.txt', '')
+            
+            # Read file content
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read().strip()
+            
+            if not text:
                 continue
             
-            text = str(text)
-            
-            # Extract authors from the text content
-            # This will attempt to find author names in the paper text
+            # Extract authors from text
             extracted_authors = extractor.extract_authors(text)
             
-            # Use folder_owner as primary author if no authors extracted
+            # Use folder_owner as primary author
             if not extracted_authors:
-                authors_list = [folder_owner] if folder_owner and folder_owner != 'nan' else []
+                authors_list = [folder_owner] if folder_owner else []
             else:
-                # Include folder_owner in the authors list if not already present
                 authors_list = extracted_authors.copy()
-                if folder_owner and folder_owner != 'nan' and folder_owner not in authors_list:
+                if folder_owner and folder_owner not in authors_list:
                     authors_list.insert(0, folder_owner)
             
-            # Skip papers with no authors
             if not authors_list:
                 continue
 
@@ -256,23 +260,24 @@ def load_corpus_from_csv(csv_path):
                 'text': text,
                 'paper_id': paper_id,
                 'authors': authors_list,
-                'folder_owner': folder_owner
+                'folder_owner': folder_owner,
+                'filename': filename
             })
             
             # Add authors to mapping
             for author in authors_list:
-                author_paper_map[author].append(paper_idx)
+                author_paper_map[author].append(idx)
                 all_authors.add(author)
             
             # Add to network
             network.add_paper(paper_id, authors_list)
 
         except Exception as e:
-            st.warning(f"⚠️ Skipped row {paper_idx} due to data error: {e}")
+            st.warning(f"⚠️ Skipped {filename}: {e}")
             continue
 
     if not papers:
-        st.error("❌ No valid papers found in CSV file!")
+        st.error("❌ No valid papers found!")
         return None, None, None, None, None
 
     corpus_texts = [p['text'] for p in papers]
@@ -281,7 +286,6 @@ def load_corpus_from_csv(csv_path):
     st.info(f"📊 Loaded {len(papers)} papers with {len(unique_authors)} unique authors")
     
     return unique_authors, corpus_texts, author_paper_map, papers, network
-
 
 # ============================
 # RECOMMENDER SYSTEM
@@ -415,20 +419,30 @@ class MultiAuthorshipRecommender:
 # ============================
 # HELPER FUNCTIONS
 # ============================
-def extract_text_from_pdf(pdf_file):
-    """Extract and clean text from PDF."""
+def extract_text_from_input(uploaded_file):
+    """Extract text from uploaded file (PDF or TXT)."""
     try:
-        doc = pymupdf.open(stream=pdf_file.read(), filetype="pdf")
-        text = "".join(page.get_text() for page in doc)
-        doc.close()
+        if uploaded_file.type == "application/pdf":
+            try:
+                import pymupdf
+                doc = pymupdf.open(stream=uploaded_file.read(), filetype="pdf")
+                text = "".join(page.get_text() for page in doc)
+                doc.close()
+            except ImportError:
+                st.error("❌ PyMuPDF not installed. Please upload a text file instead.")
+                return ""
+        else:
+            # Handle text file
+            text = uploaded_file.read().decode('utf-8', errors='ignore')
         
+        # Clean text
         text = text.lower()
         text = re.sub(r'[^a-z0-9\s]', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
         
         return text
     except Exception as e:
-        st.error(f"❌ Error reading PDF: {e}")
+        st.error(f"❌ Error reading file: {e}")
         return ""
 
 def create_network_visualization(network, selected_authors):
@@ -454,11 +468,13 @@ def main():
     
     # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        if os.path.exists(CSV_PATH):
-            with st.spinner(f"⏳ Loading data from {CSV_PATH} and initializing models..."):
+        folder_path = find_data_folder()
+        
+        if folder_path:
+            with st.spinner(f"⏳ Loading papers from '{folder_path}' folder..."):
                 try:
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
-                        load_corpus_from_csv(CSV_PATH)
+                        load_corpus_from_folder(folder_path)
                     
                     if unique_authors is None:
                         st.stop()
@@ -482,13 +498,14 @@ def main():
                     st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error processing CSV data or initializing models: {e}")
+                    st.error(f"❌ Error processing data: {e}")
                     import traceback
                     st.code(traceback.format_exc())
                     st.stop()
         else:
-            st.error(f"❌ Corpus CSV file not found at: {CSV_PATH}")
-            st.info("💡 Please ensure the CSV file is present and update the CSV_PATH variable if necessary.")
+            st.error(f"❌ Data folder not found!")
+            st.info("💡 Please create a 'folder' directory with your text files in the same location as this app.")
+            st.info("📁 Expected file format: `AuthorName_PaperTitle_clean.txt`")
             st.stop()
     
     # Display statistics
@@ -525,7 +542,11 @@ def main():
     with tab1:
         st.markdown('<div class="section-header">📤 Upload Paper for Review</div>', unsafe_allow_html=True)
         
-        uploaded_file = st.file_uploader("Drop your PDF file here or click to browse", type=['pdf'], label_visibility="collapsed")
+        uploaded_file = st.file_uploader(
+            "Drop your file here or click to browse", 
+            type=['pdf', 'txt'], 
+            label_visibility="collapsed"
+        )
         
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
@@ -539,10 +560,10 @@ def main():
             if st.button("🚀 Generate Recommendations", type="primary", use_container_width=True):
                 with st.spinner("🔍 Analyzing paper and generating recommendations..."):
                     # Extract text
-                    text = extract_text_from_pdf(uploaded_file)
+                    text = extract_text_from_input(uploaded_file)
                     
                     if not text:
-                        st.error("❌ Could not extract text from PDF! Please ensure the PDF is readable.")
+                        st.error("❌ Could not extract text from file! Please ensure the file is readable.")
                         return
                     
                     # Extract authors
@@ -696,4 +717,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
