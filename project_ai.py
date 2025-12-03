@@ -185,31 +185,66 @@ def create_network_visualization(network, selected_authors):
 # ============================
 # MAIN APPLICATION
 # ============================
+# ============================
+# MAIN APPLICATION
+# ============================
 def main():
     st.markdown('<div class="main-header">📚 Reviewer Recommendation System</div>', unsafe_allow_html=True)
     
     # --- LOAD PRE-CALCULATED DATA ---
     @st.cache_resource
     def load_system():
-        # 1. Load the SBERT Model (needed for query encoding)
-        model = SentenceTransformer(SBERT_MODEL_NAME)
+        import os
+        
+        # Set HuggingFace cache to Streamlit's temp directory
+        cache_dir = '/tmp/huggingface'
+        os.makedirs(cache_dir, exist_ok=True)
+        os.environ['HF_HOME'] = cache_dir
+        os.environ['TRANSFORMERS_CACHE'] = cache_dir
+        os.environ['SENTENCE_TRANSFORMERS_HOME'] = cache_dir
+        
+        # 1. Load the SBERT Model with explicit cache
+        try:
+            st.info("📦 Loading SBERT model (first run may take 1-2 minutes)...")
+            model = SentenceTransformer(
+                'sentence-transformers/all-MiniLM-L6-v2',
+                device='cpu',
+                cache_folder=cache_dir
+            )
+            st.success("✅ Model loaded successfully!")
+        except Exception as e:
+            st.error(f"❌ Error loading model: {e}")
+            st.info("💡 Trying alternative loading method...")
+            try:
+                # Fallback method
+                model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+                st.success("✅ Model loaded via fallback!")
+            except Exception as e2:
+                st.error(f"❌ Fallback also failed: {e2}")
+                st.stop()
         
         # 2. Load the Pickle File
         pkl_path = "reviewer_data.pkl"
         
         if not os.path.exists(pkl_path):
+            st.error("❌ 'reviewer_data.pkl' not found! Please ensure it's in your repository.")
             return None, None
             
-        with open(pkl_path, 'rb') as f:
-            data = pickle.load(f)
+        try:
+            with open(pkl_path, 'rb') as f:
+                data = pickle.load(f)
+            st.success("✅ Data loaded successfully!")
+        except Exception as e:
+            st.error(f"❌ Error loading pickle file: {e}")
+            return None, None
             
         return data, model
 
     with st.spinner("🚀 Loading pre-computed database..."):
         data_dict, sbert_model = load_system()
     
-    if data_dict is None:
-        st.error("❌ 'reviewer_data.pkl' not found! Please run 'generate_data.py' locally and upload the result.")
+    if data_dict is None or sbert_model is None:
+        st.error("❌ Failed to load system. Please check your files.")
         st.stop()
         
     # Initialize Recommender
