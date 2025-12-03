@@ -11,7 +11,7 @@ from sentence_transformers import SentenceTransformer
 import warnings
 warnings.filterwarnings('ignore')
 
-# Disable hf_transfer to avoid download issues
+# Disable fast download optimization for local testing simplicity
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS
+# Custom CSS (Left unchanged)
 st.markdown("""
 <style>
 [data-testid="stSidebar"] {
@@ -100,23 +100,20 @@ st.markdown("""
 # ============================
 # CONFIGURATION
 # ============================
+# Use the stable L4 model (local embedding generation must use this too)
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# Try multiple possible paths for the data folder
-POSSIBLE_PATHS = [
-    "folder",  # Local development
-    "./folder",
-    "../folder",
-    "data/folder",  # Alternative structure
-]
+# --- LOCAL DATA PATHING ---
+# Assumes the 'folder' directory is in the same directory as the script.
+DEFAULT_DATA_FOLDER = "data"
 
 def find_data_folder():
-    """Find the data folder in various possible locations."""
-    for path in POSSIBLE_PATHS:
-        if os.path.exists(path) and os.path.isdir(path):
-            return path
-    return None
+    """Returns the local path to the data folder."""
+    # Use os.path.dirname(__file__) for robust pathing relative to the script location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, DEFAULT_DATA_FOLDER)
+
 
 # ============================
 # CO-AUTHOR EXTRACTION
@@ -125,11 +122,8 @@ class CoAuthorExtractor:
     """Extract author names from paper text."""
     
     def __init__(self):
-        try:
-            import spacy
-            self.nlp = spacy.load("en_core_web_sm")
-        except:
-            self.nlp = None
+        # NOTE: Spacy loading is memory intensive. Disabling for stability.
+        self.nlp = None 
         
         self.author_patterns = [
             r'(?:authors?|by)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)*(?:\s+and\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)?)',
@@ -157,23 +151,11 @@ class CoAuthorExtractor:
         
     def extract_authors(self, text):
         """Extracts author names using NER or REGEX."""
-        if self.nlp:
-            try:
-                doc = self.nlp(text[:2000]) 
-                ner_authors = set()
-                for ent in doc.ents:
-                    if ent.label_ == "PERSON":
-                        name = self._normalize_name(ent.text)
-                        if 2 <= len(name.split()) <= 4 and all(word[0].isupper() for word in name.split() if word):
-                            ner_authors.add(name)
-                if ner_authors:
-                    return list(ner_authors)
-            except:
-                pass
+        # Use regex fallback as primary method for stability
         return self._extract_by_regex(text)
 
 # ============================
-# CO-AUTHORSHIP NETWORK
+# CO-AUTHORSHIP NETWORK (Left unchanged)
 # ============================
 class CoAuthorshipNetwork:
     """Build and query co-authorship network."""
@@ -218,6 +200,7 @@ def load_corpus_from_folder(folder_path):
     author_paper_map = defaultdict(list)
     all_authors = set()
     
+    # Check if folder exists
     if not os.path.exists(folder_path):
         st.error(f"❌ Error: Data folder not found at: {folder_path}")
         return None, None, None, None, None
@@ -231,11 +214,14 @@ def load_corpus_from_folder(folder_path):
     
     extractor = CoAuthorExtractor()
     
-    for idx, filename in enumerate(txt_files):
+    # --- CRITICAL CHANGE 1: Initialize the clean index counter ---
+    clean_idx = 0 
+    
+    for filename in txt_files: # Note: We don't use 'idx' from enumerate anymore
         try:
             file_path = os.path.join(folder_path, filename)
             
-            # Extract author name from filename (format: "AuthorName_PaperTitle_clean.txt")
+            # Extract metadata
             folder_owner = filename.split('_')[0].strip()
             paper_id = filename.replace('_clean.txt', '')
             
@@ -243,13 +229,14 @@ def load_corpus_from_folder(folder_path):
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read().strip()
             
-            if not text:
+            # Skip if text is empty
+            if not text: 
                 continue
             
             # Extract authors from text
             extracted_authors = extractor.extract_authors(text)
             
-            # Use folder_owner as primary author
+            # Consolidate authors list
             if not extracted_authors:
                 authors_list = [folder_owner] if folder_owner else []
             else:
@@ -257,9 +244,11 @@ def load_corpus_from_folder(folder_path):
                 if folder_owner and folder_owner not in authors_list:
                     authors_list.insert(0, folder_owner)
             
-            if not authors_list:
+            # Skip if no authors found
+            if not authors_list: 
                 continue
 
+            # --- CRITICAL CHANGE 2: Append the VALID paper ---
             papers.append({
                 'text': text,
                 'paper_id': paper_id,
@@ -268,13 +257,17 @@ def load_corpus_from_folder(folder_path):
                 'filename': filename
             })
             
-            # Add authors to mapping
+            # Add authors to mapping using the clean index
             for author in authors_list:
-                author_paper_map[author].append(idx)
+                # Use the index of the paper in the 'papers' list
+                author_paper_map[author].append(clean_idx)
                 all_authors.add(author)
             
             # Add to network
             network.add_paper(paper_id, authors_list)
+
+            # --- CRITICAL CHANGE 3: Increment index ONLY for successful papers ---
+            clean_idx += 1 
 
         except Exception as e:
             st.warning(f"⚠️ Skipped {filename}: {e}")
@@ -324,26 +317,8 @@ class MultiAuthorshipRecommender:
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.corpus_texts)
         
         with st.spinner(f"🤖 Loading SBERT model ({SBERT_MODEL_NAME})..."):
-            try:
-                # Try loading with explicit trust_remote_code and local_files_only=False
-                self.sbert_model = SentenceTransformer(
-                    SBERT_MODEL_NAME, 
-                    device=DEVICE,
-                    cache_folder=None  # Use default cache
-                )
-            except Exception as e:
-                st.error(f"Failed to load SBERT model: {str(e)}")
-                st.info("💡 Trying alternative download method...")
-                try:
-                    # Alternative: specify full model path
-                    self.sbert_model = SentenceTransformer(
-                        f"sentence-transformers/{SBERT_MODEL_NAME}",
-                        device=DEVICE
-                    )
-                except Exception as e2:
-                    st.error(f"❌ Could not load model: {str(e2)}")
-                    st.error("Please check your internet connection and try again.")
-                    raise
+            # DIRECT LOADING: Robust method for local/fresh environments
+            self.sbert_model = SentenceTransformer(SBERT_MODEL_NAME, device=DEVICE)
         
         with st.spinner("📊 Encoding corpus with SBERT..."):
             self.sbert_embeddings = self.sbert_model.encode(
@@ -445,6 +420,7 @@ class MultiAuthorshipRecommender:
 def extract_text_from_input(uploaded_file):
     """Extract text from uploaded file (PDF or TXT)."""
     try:
+        # Check by MIME type first
         if uploaded_file.type == "application/pdf":
             try:
                 import pymupdf
@@ -452,12 +428,13 @@ def extract_text_from_input(uploaded_file):
                 text = "".join(page.get_text() for page in doc)
                 doc.close()
             except ImportError:
+                # Fallback if pymupdf is not installed locally
                 st.error("❌ PyMuPDF not installed. Please upload a text file instead.")
                 return ""
         else:
-            # Handle text file
+            # Handle text file or unknown types as text
             text = uploaded_file.read().decode('utf-8', errors='ignore')
-        
+            
         # Clean text
         text = text.lower()
         text = re.sub(r'[^a-z0-9\s]', ' ', text)
@@ -493,7 +470,7 @@ def main():
     if 'data_loaded' not in st.session_state:
         folder_path = find_data_folder()
         
-        if folder_path:
+        if folder_path and os.path.exists(folder_path):
             with st.spinner(f"⏳ Loading papers from '{folder_path}' folder..."):
                 try:
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
@@ -527,8 +504,7 @@ def main():
                     st.stop()
         else:
             st.error(f"❌ Data folder not found!")
-            st.info("💡 Please create a 'folder' directory with your text files in the same location as this app.")
-            st.info("📁 Expected file format: `AuthorName_PaperTitle_clean.txt`")
+            st.info("💡 Please ensure your 'folder' directory is located in the same directory as this app.")
             st.stop()
     
     # Display statistics (only if data is loaded)
@@ -557,9 +533,9 @@ def main():
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.error("❌ Data not loaded. Please check the folder path and refresh the page.")
-        st.stop()  # Stop execution if data isn't loaded
-    
+        st.error("❌ System initialization failed.")
+        st.stop()
+        
     st.markdown("<br>", unsafe_allow_html=True)
     
     # Tabs
