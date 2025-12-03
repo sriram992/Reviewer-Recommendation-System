@@ -22,23 +22,74 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ============================
-# CUSTOM CSS
-# ============================
+# Custom CSS
 st.markdown("""
 <style>
-[data-testid="stSidebar"] {display: none;}
+[data-testid="stSidebar"] {
+    display: none;
+}
 .main-header {
-    font-size: 2.8rem; font-weight: 700; color: #1f77b4;
-    text-align: center; margin-bottom: 0.5rem; letter-spacing: -0.5px;
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #1f77b4;
+    text-align: center;
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.5px;
 }
 .sub-header {
-    font-size: 1.1rem; color: #666; text-align: center;
-    margin-bottom: 2.5rem; font-weight: 400;
+    font-size: 1.1rem;
+    color: #666;
+    text-align: center;
+    margin-bottom: 2.5rem;
+    font-weight: 400;
+}
+.metric-container {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1.5rem;
+    border-radius: 12px;
+    color: white;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+.metric-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
+.metric-label {
+    font-size: 0.9rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.stTabs [data-baseweb="tab-list"] {
+    gap: 1rem;
+    background-color: #f8f9fa;
+    padding: 0.5rem;
+    border-radius: 10px;
+}
+.stTabs [data-baseweb="tab"][aria-selected="true"] {
+    background-color: #1f77b4;
+    color: white;
 }
 .section-header {
-    font-size: 1.5rem; font-weight: 600; color: #333;
-    margin: 2rem 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 2px solid #e9ecef;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #333;
+    margin: 2rem 0 1rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #e9ecef;
+}
+.network-info {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 4px solid #1f77b4;
+    margin: 0.5rem 0;
+}
+.stButton button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 </style>
 """, unsafe_allow_html=True)
@@ -48,30 +99,35 @@ st.markdown("""
 # ============================
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-
+# 🚨 UPDATED PATH: CSV file path
+CSV_PATH = "folder/corpus_index.csv"
 
 # ============================
 # CO-AUTHOR EXTRACTION
 # ============================
 class CoAuthorExtractor:
     """Extract author names from paper text."""
+    
     def __init__(self):
         try:
             import spacy
             self.nlp = spacy.load("en_core_web_sm")
-        except Exception:
+        except:
             self.nlp = None
         
         self.author_patterns = [
-            r'(?:authors?|by)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)*(?:\s+and\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)?)'
+            r'(?:authors?|by)[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+(?:\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)*(?:\s+and\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)?)',
         ]
 
     def _normalize_name(self, name):
+        """Normalize author name for matching."""
         return ' '.join(name.split()).title()
 
     def _extract_by_regex(self, text, max_chars=1500):
+        """Fallback method using simple REGEX heuristics."""
         header = text[:max_chars]
         authors = set()
+        
         for pattern in self.author_patterns:
             matches = re.findall(pattern, header, re.MULTILINE)
             for match in matches:
@@ -84,6 +140,7 @@ class CoAuthorExtractor:
         return list(authors)
         
     def extract_authors(self, text):
+        """Extracts author names using NER or REGEX."""
         if self.nlp:
             try:
                 doc = self.nlp(text[:2000]) 
@@ -95,20 +152,22 @@ class CoAuthorExtractor:
                             ner_authors.add(name)
                 if ner_authors:
                     return list(ner_authors)
-            except Exception:
+            except:
                 pass
         return self._extract_by_regex(text)
-
 
 # ============================
 # CO-AUTHORSHIP NETWORK
 # ============================
 class CoAuthorshipNetwork:
+    """Build and query co-authorship network."""
+    
     def __init__(self):
         self.network = defaultdict(set)
         self.paper_authors = {}
     
     def add_paper(self, paper_id, authors):
+        """Add a paper and its authors to the network."""
         self.paper_authors[paper_id] = authors
         for i, author1 in enumerate(authors):
             for author2 in authors[i+1:]:
@@ -116,52 +175,111 @@ class CoAuthorshipNetwork:
                 self.network[author2].add(author1)
     
     def get_coauthors(self, author):
+        """Get all co-authors of a given author."""
         return self.network.get(author, set())
     
     def has_collaborated(self, author1, author2):
+        """Check if two authors have collaborated."""
         return author2 in self.network.get(author1, set())
     
     def collaboration_count(self, author1, author2):
-        return sum(author1 in authors and author2 in authors for authors in self.paper_authors.values())
-
+        """Count number of collaborations between two authors."""
+        count = 0
+        for paper_id, authors in self.paper_authors.items():
+            if author1 in authors and author2 in authors:
+                count += 1
+        return count
 
 # ============================
-# DATA LOADING FROM FOLDER
+# DATA LOADING FROM CSV
 # ============================
 @st.cache_resource
-def load_corpus_with_multi_authorship(base_dir):
-    extractor = CoAuthorExtractor()
+def load_corpus_from_csv(csv_path):
+    """Load all papers from CSV and create necessary data structures."""
+    
     network = CoAuthorshipNetwork()
-    papers, author_paper_map, all_authors = [], defaultdict(list), set()
-    paper_idx = 0
+    papers = []
+    author_paper_map = defaultdict(list)
+    all_authors = set()
+    
+    if not os.path.exists(csv_path):
+        st.error(f"❌ Error: Corpus file not found at: {csv_path}")
+        return None, None, None, None, None
+    
+    try:
+        # Read the CSV file
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        st.error(f"❌ Error reading CSV file: {e}")
+        return None, None, None, None, None
 
-    for file in os.listdir(base_dir):
-        if not file.endswith(".txt"):
-            continue
-        file_path = os.path.join(base_dir, file)
+    # Ensure required columns exist
+    required_cols = ['text_content', 'paper_id', 'folder_owner']
+    if not all(col in df.columns for col in required_cols):
+        st.error(f"❌ CSV file must contain columns: {required_cols}")
+        st.info(f"Found columns: {list(df.columns)}")
+        return None, None, None, None, None
+
+    # Initialize CoAuthorExtractor for extracting authors from text
+    extractor = CoAuthorExtractor()
+    
+    for paper_idx, row in df.iterrows():
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                text = f.read().strip()
-            if not text:
+            text = row['text_content']
+            paper_id = str(row['paper_id'])
+            folder_owner = str(row['folder_owner']).strip()
+            
+            # Skip if text is missing or empty
+            if pd.isna(text) or not str(text).strip():
+                continue
+            
+            text = str(text)
+            
+            # Extract authors from the text content
+            # This will attempt to find author names in the paper text
+            extracted_authors = extractor.extract_authors(text)
+            
+            # Use folder_owner as primary author if no authors extracted
+            if not extracted_authors:
+                authors_list = [folder_owner] if folder_owner and folder_owner != 'nan' else []
+            else:
+                # Include folder_owner in the authors list if not already present
+                authors_list = extracted_authors.copy()
+                if folder_owner and folder_owner != 'nan' and folder_owner not in authors_list:
+                    authors_list.insert(0, folder_owner)
+            
+            # Skip papers with no authors
+            if not authors_list:
                 continue
 
-            author_name = file.split("_")[0].strip()
-            paper_authors = extractor.extract_authors(text)
-            if author_name not in paper_authors:
-                paper_authors.insert(0, author_name)
-
-            paper_id = file.replace(".txt", "")
-            papers.append({"text": text, "paper_id": paper_id, "authors": paper_authors})
-            for author in paper_authors:
+            papers.append({
+                'text': text,
+                'paper_id': paper_id,
+                'authors': authors_list,
+                'folder_owner': folder_owner
+            })
+            
+            # Add authors to mapping
+            for author in authors_list:
                 author_paper_map[author].append(paper_idx)
                 all_authors.add(author)
-            network.add_paper(paper_id, paper_authors)
-            paper_idx += 1
-        except Exception as e:
-            print(f"⚠️ Error reading {file_path}: {e}")
+            
+            # Add to network
+            network.add_paper(paper_id, authors_list)
 
-    corpus_texts = [p["text"] for p in papers]
+        except Exception as e:
+            st.warning(f"⚠️ Skipped row {paper_idx} due to data error: {e}")
+            continue
+
+    if not papers:
+        st.error("❌ No valid papers found in CSV file!")
+        return None, None, None, None, None
+
+    corpus_texts = [p['text'] for p in papers]
     unique_authors = sorted(list(all_authors))
+    
+    st.info(f"📊 Loaded {len(papers)} papers with {len(unique_authors)} unique authors")
+    
     return unique_authors, corpus_texts, author_paper_map, papers, network
 
 
@@ -169,140 +287,269 @@ def load_corpus_with_multi_authorship(base_dir):
 # RECOMMENDER SYSTEM
 # ============================
 class MultiAuthorshipRecommender:
+    """Recommender where ALL authors on a paper get full content credit."""
+    
     def __init__(self, unique_authors, corpus_texts, author_paper_map, papers, network,
                  use_coauthor_boost=True, coauthor_weight=0.2):
+        
         self.unique_authors = unique_authors
         self.corpus_texts = corpus_texts
         self.author_paper_map = author_paper_map
         self.papers = papers
         self.network = network
+        
         self.use_coauthor_boost = use_coauthor_boost
         self.coauthor_weight = coauthor_weight
         self.content_weight = 1.0 - coauthor_weight
+        
+        self.dynamic_authors = []
         self._build_models()
     
     def _build_models(self):
+        """Build TF-IDF and SBERT models."""
         with st.spinner("🔧 Building TF-IDF model..."):
-            self.tfidf_vectorizer = TfidfVectorizer(max_features=5000)
+            self.tfidf_vectorizer = TfidfVectorizer(
+                max_features=5000,
+                min_df=1,
+                max_df=1.0
+            )
             self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(self.corpus_texts)
+        
         with st.spinner(f"🤖 Loading SBERT model ({SBERT_MODEL_NAME})..."):
             self.sbert_model = SentenceTransformer(SBERT_MODEL_NAME, device=DEVICE)
+        
         with st.spinner("📊 Encoding corpus with SBERT..."):
             self.sbert_embeddings = self.sbert_model.encode(
-                self.corpus_texts, convert_to_numpy=True, show_progress_bar=False, batch_size=32
+                self.corpus_texts,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+                batch_size=32
             )
     
     def _calculate_author_content_score(self, query_vec, author, is_sbert=False):
-        indices = self.author_paper_map.get(author, [])
-        if not indices:
+        """Calculate content score for an author based on ALL papers they authored."""
+        paper_indices = self.author_paper_map.get(author, [])
+        
+        if not paper_indices:
             return 0.0
+        
         if is_sbert:
-            scores = cosine_similarity(query_vec, self.sbert_embeddings[indices]).flatten()
+            author_embeddings = self.sbert_embeddings[paper_indices]
+            scores = cosine_similarity(query_vec, author_embeddings).flatten()
         else:
-            scores = cosine_similarity(query_vec, self.tfidf_matrix[indices]).flatten()
+            author_vectors = self.tfidf_matrix[paper_indices]
+            scores = cosine_similarity(query_vec, author_vectors).flatten()
+        
         return float(np.max(scores))
     
     def _calculate_coauthor_boost(self, paper_authors):
-        boost = np.zeros(len(self.unique_authors))
+        """Calculate co-authorship boost for each reviewer."""
+        boost_scores = np.zeros(len(self.unique_authors))
+        
         for idx, reviewer in enumerate(self.unique_authors):
-            for pa in paper_authors:
-                if self.network.has_collaborated(reviewer, pa):
-                    collab_count = self.network.collaboration_count(reviewer, pa)
-                    boost[idx] = min(1.0, collab_count / 5.0)
+            for paper_author in paper_authors:
+                if self.network.has_collaborated(reviewer, paper_author):
+                    collab_count = self.network.collaboration_count(reviewer, paper_author)
+                    boost_scores[idx] = min(1.0, collab_count / 5.0)
                     break
-        return boost
+        
+        return boost_scores
     
-    def _recommend_engine(self, text, is_sbert, paper_authors=None, top_k=5):
+    def _recommend_engine(self, text, is_sbert, paper_authors=None, top_k=5, exclude_authors=None):
+        """Core recommendation engine."""
         if not text.strip():
             return None
-        query_vec = self.sbert_model.encode([text], convert_to_numpy=True) if is_sbert else self.tfidf_vectorizer.transform([text])
-        content_scores = [self._calculate_author_content_score(query_vec, a, is_sbert) for a in self.unique_authors]
-        df = pd.DataFrame({'Author': self.unique_authors, 'Content': content_scores})
-        if self.use_coauthor_boost and paper_authors:
-            boost = self._calculate_coauthor_boost(paper_authors)
-            df['CoAuthor'] = boost
-            df['Score'] = self.content_weight * df['Content'] + self.coauthor_weight * df['CoAuthor']
+        
+        if is_sbert:
+            query_vec = self.sbert_model.encode([text], convert_to_numpy=True)
         else:
-            df['Score'] = df['Content']
-        df = df.sort_values(by='Score', ascending=False).head(top_k).reset_index(drop=True)
-        df.insert(0, 'Rank', range(1, len(df)+1))
-        return df.round(4)
-
+            query_vec = self.tfidf_vectorizer.transform([text])
+        
+        content_scores = []
+        for author in self.unique_authors:
+            score = self._calculate_author_content_score(query_vec, author, is_sbert)
+            content_scores.append(score)
+        
+        results_df = pd.DataFrame({
+            'Author': self.unique_authors,
+            'Content': content_scores
+        })
+        
+        if self.use_coauthor_boost and paper_authors:
+            boost_scores = self._calculate_coauthor_boost(paper_authors)
+            results_df['CoAuthor'] = boost_scores
+            results_df['Score'] = (
+                self.content_weight * results_df['Content'] +
+                self.coauthor_weight * results_df['CoAuthor']
+            )
+        else:
+            results_df['Score'] = results_df['Content']
+        
+        if exclude_authors:
+            results_df = results_df[~results_df['Author'].isin(exclude_authors)]
+        
+        results_df = results_df.sort_values(by='Score', ascending=False)
+        top_results = results_df.head(top_k).copy()
+        
+        top_results.insert(0, 'Rank', range(1, len(top_results) + 1))
+        top_results['Score'] = top_results['Score'].round(4)
+        top_results['Content'] = top_results['Content'].round(4)
+        
+        if 'CoAuthor' in top_results.columns:
+            top_results['CoAuthor'] = top_results['CoAuthor'].round(4)
+        
+        return top_results
+    
     def recommend(self, text, paper_authors=None, top_k=5, method='both', exclude_authors=None):
+        """Get reviewer recommendations."""
         results = {}
-    
-        if method in ('tfidf', 'both'):
-            tfidf_df = self._recommend_engine(text, is_sbert=False, paper_authors=paper_authors, top_k=top_k * 2)
-            if exclude_authors and not tfidf_df.empty:
-                tfidf_df = tfidf_df[~tfidf_df['Author'].isin(exclude_authors)]
-            results['tfidf'] = tfidf_df.head(top_k)
-    
-        if method in ('sbert', 'both'):
-            sbert_df = self._recommend_engine(text, is_sbert=True, paper_authors=paper_authors, top_k=top_k * 2)
-            if exclude_authors and not sbert_df.empty:
-                sbert_df = sbert_df[~sbert_df['Author'].isin(exclude_authors)]
-            results['sbert'] = sbert_df.head(top_k)
-    
+        
+        if method in ['tfidf', 'both']:
+            results['tfidf'] = self._recommend_engine(text, False, paper_authors, top_k, exclude_authors)
+        
+        if method in ['sbert', 'both']:
+            results['sbert'] = self._recommend_engine(text, True, paper_authors, top_k, exclude_authors)
+        
         return results
 
-
-
 # ============================
-# HELPER
+# HELPER FUNCTIONS
 # ============================
-def extract_text_from_pdf(pdf_file):
+def extract_text_from_file(uploaded_file):
+    """Extract and clean text from PDF or TXT."""
+    text = ""
     try:
-        doc = pymupdf.open(stream=pdf_file.read(), filetype="pdf")
-        text = "".join(page.get_text() for page in doc)
-        doc.close()
-        return re.sub(r'\s+', ' ', text)
+        # Determine file extension from the uploaded file object
+        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+        if file_ext == ".txt":
+            # Handle Text File: Read bytes and decode
+            text = uploaded_file.read().decode("utf-8")
+            
+        elif file_ext == ".pdf":
+            # Handle PDF File: Use PyMuPDF
+            doc = pymupdf.open(stream=uploaded_file.read(), filetype="pdf")
+            text = "".join(page.get_text() for page in doc)
+            doc.close()
+            
+        else:
+            st.error("❌ Unsupported file format.")
+            return ""
+
+        # Common Cleaning Logic
+        text = text.lower()
+        text = re.sub(r'[^a-z0-9\s]', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
+
+    except UnicodeDecodeError:
+        st.error("❌ Error: Could not decode text file. Ensure it is UTF-8 encoded.")
+        return ""
     except Exception as e:
-        st.error(f"❌ Error reading PDF: {e}")
+        st.error(f"❌ Error reading file: {e}")
         return ""
 
+def create_network_visualization(network, selected_authors):
+    """Create a simple network visualization of collaborations."""
+    if not selected_authors:
+        return None
+    
+    network_text = ""
+    for author in selected_authors[:5]:
+        coauthors = list(network.get_coauthors(author))[:3]
+        if coauthors:
+            network_text += f"**{author}** → {', '.join(coauthors)}\n\n"
+    
+    return network_text if network_text else None
 
 # ============================
-# MAIN STREAMLIT APP
+# MAIN APPLICATION
 # ============================
 def main():
+    # Header
     st.markdown('<div class="main-header">📚 Reviewer Recommendation System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">AI-Powered Paper Review Matching with Co-Author Network Analysis</div>', unsafe_allow_html=True)
-    st.markdown("---")
-
-    BASE_DIR = "folder/"
-
+    
+    # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        if os.path.exists(BASE_DIR):
-            with st.spinner("⏳ Loading text files from folder..."):
-                unique_authors, corpus_texts, author_paper_map, papers, network = \
-                    load_corpus_with_multi_authorship(BASE_DIR)
-                if not papers:
-                    st.error("❌ No text files found in folder.")
+        if os.path.exists(CSV_PATH):
+            with st.spinner(f"⏳ Loading data from {CSV_PATH} and initializing models..."):
+                try:
+                    unique_authors, corpus_texts, author_paper_map, papers, network = \
+                        load_corpus_from_csv(CSV_PATH)
+                    
+                    if unique_authors is None:
+                        st.stop()
+                        
+                    st.session_state.data_loaded = True
+                    st.session_state.unique_authors = unique_authors
+                    st.session_state.corpus_texts = corpus_texts
+                    st.session_state.author_paper_map = author_paper_map
+                    st.session_state.papers = papers
+                    st.session_state.network = network
+                    st.session_state.use_coauthor_boost = True
+                    st.session_state.coauthor_weight = 0.2
+                    
+                    # Initialize recommender
+                    recommender = MultiAuthorshipRecommender(
+                        unique_authors, corpus_texts, author_paper_map, papers, network,
+                        use_coauthor_boost=True, coauthor_weight=0.2
+                    )
+                    st.session_state.recommender = recommender
+                    
+                    st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error processing CSV data or initializing models: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
                     st.stop()
-                st.session_state.data_loaded = True
-                st.session_state.unique_authors = unique_authors
-                st.session_state.corpus_texts = corpus_texts
-                st.session_state.author_paper_map = author_paper_map
-                st.session_state.papers = papers
-                st.session_state.network = network
-                st.session_state.recommender = MultiAuthorshipRecommender(
-                    unique_authors, corpus_texts, author_paper_map, papers, network
-                )
-                st.success(f"✅ Loaded {len(papers)} papers from {len(unique_authors)} authors.")
-                st.rerun()
         else:
-            st.error("❌ Folder not found.")
+            st.error(f"❌ Corpus CSV file not found at: {CSV_PATH}")
+            st.info("💡 Please ensure the CSV file is present and update the CSV_PATH variable if necessary.")
             st.stop()
-
+    
+    # Display statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-container">
+            <div class="metric-value">{len(st.session_state.papers)}</div>
+            <div class="metric-label">Total Papers</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div class="metric-container">
+            <div class="metric-value">{len(st.session_state.unique_authors)}</div>
+            <div class="metric-label">Total Authors</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        avg_authors = np.mean([len(p['authors']) for p in st.session_state.papers])
+        st.markdown(f"""
+        <div class="metric-container">
+            <div class="metric-value">{avg_authors:.1f}</div>
+            <div class="metric-label">Avg Authors/Paper</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
     # Tabs
-    tab1, tab2, tab3 = st.tabs(["🧠 Find Reviewers", "👥 Author Pool", "📈 Analytics"])
-
-    # TAB 1
-        # Tab 1: Recommend Reviewers
+    tab1, tab2, tab3 = st.tabs(["📄 Recommend Reviewers", "👥 Author Pool", "📈 Analytics"])
+    
+    # Tab 1: Recommend Reviewers
     with tab1:
         st.markdown('<div class="section-header">📤 Upload Paper for Review</div>', unsafe_allow_html=True)
         
-        uploaded_file = st.file_uploader("Drop your PDF file here or click to browse", type=['pdf'], label_visibility="collapsed")
+        # In main(), inside 'with tab1:'
+        uploaded_file = st.file_uploader(
+            "Drop your PDF or TXT file here or click to browse", 
+            type=['pdf', 'txt'],  
+            label_visibility="collapsed"
+        )
         
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
@@ -316,7 +563,7 @@ def main():
             if st.button("🚀 Generate Recommendations", type="primary", use_container_width=True):
                 with st.spinner("🔍 Analyzing paper and generating recommendations..."):
                     # Extract text
-                    text = extract_text_from_pdf(uploaded_file)
+                    text = extract_text_from_file(uploaded_file)
                     
                     if not text:
                         st.error("❌ Could not extract text from PDF! Please ensure the PDF is readable.")
@@ -392,11 +639,14 @@ def main():
                             else:
                                 st.info("ℹ️ No collaboration data available for top recommended reviewers.")
     
-
-    # TAB 2
+    # Tab 2: Author Pool
     with tab2:
         st.markdown('<div class="section-header">👥 Reviewer Pool Overview</div>', unsafe_allow_html=True)
-        search_query = st.text_input("🔍 Search authors by name", "")
+        
+        # Search
+        search_query = st.text_input("🔍 Search authors by name", "", placeholder="Enter author name...")
+        
+        # Create DataFrame
         author_data = []
         for author in st.session_state.unique_authors:
             paper_count = len(st.session_state.author_paper_map.get(author, []))
@@ -406,32 +656,68 @@ def main():
                 'Papers': paper_count,
                 'Collaborators': coauthor_count
             })
+        
         df = pd.DataFrame(author_data)
+        
+        # Filter
         if search_query:
             df = df[df['Author'].str.contains(search_query, case=False)]
+        
+        # Display
         st.dataframe(df, use_container_width=True, hide_index=True, height=500)
-
-    # TAB 3
+        
+        # Statistics
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📊 Total Authors", len(df))
+        with col2:
+            st.metric("📄 Avg Papers/Author", f"{df['Papers'].mean():.1f}")
+        with col3:
+            st.metric("🤝 Avg Collaborators", f"{df['Collaborators'].mean():.1f}")
+    
+    # Tab 3: Analytics
     with tab3:
         st.markdown('<div class="section-header">📈 Dataset Analytics</div>', unsafe_allow_html=True)
-        df = pd.DataFrame([{
-            'Author': a,
-            'Papers': len(st.session_state.author_paper_map.get(a, [])),
-            'Collaborators': len(st.session_state.network.get_coauthors(a))
-        } for a in st.session_state.unique_authors])
+        
+        # Create analytics
+        author_data = []
+        for author in st.session_state.unique_authors:
+            paper_count = len(st.session_state.author_paper_map.get(author, []))
+            coauthor_count = len(st.session_state.network.get_coauthors(author))
+            author_data.append({
+                'Author': author,
+                'Papers': paper_count,
+                'Collaborators': coauthor_count
+            })
+        
+        df = pd.DataFrame(author_data)
+        
         col1, col2 = st.columns(2)
+        
         with col1:
-            st.markdown("### 📊 Top 10 Most Prolific Authors")
-            st.dataframe(df.nlargest(10, 'Papers'), use_container_width=True, hide_index=True)
+            st.markdown("### 📊 Top 15 Most Prolific Authors")
+            top_authors = df.nlargest(15, 'Papers')[['Author', 'Papers']]
+            st.dataframe(top_authors, use_container_width=True, hide_index=True, height=500)
+        
         with col2:
-            st.markdown("### 🌐 Top 10 Most Connected Authors")
-            st.dataframe(df.nlargest(10, 'Collaborators'), use_container_width=True, hide_index=True)
-        st.markdown("---")
-        st.metric("📄 Total Papers", len(st.session_state.papers))
-        st.metric("👥 Total Authors", len(df))
-
+            st.markdown("### 🌐 Top 15 Most Connected Authors")
+            top_collab = df.nlargest(15, 'Collaborators')[['Author', 'Collaborators']]
+            st.dataframe(top_collab, use_container_width=True, hide_index=True, height=500)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("📄 Total Papers", len(st.session_state.papers))
+        with col2:
+            st.metric("👥 Total Authors", len(df))
+        with col3:
+            st.metric("📊 Max Papers by Author", df['Papers'].max())
+        with col4:
+            st.metric("🤝 Max Collaborators", df['Collaborators'].max())
 
 if __name__ == "__main__":
     main()
-
 
