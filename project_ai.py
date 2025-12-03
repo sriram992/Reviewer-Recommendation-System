@@ -189,51 +189,49 @@ class CoAuthorshipNetwork:
         return count
 
 # ============================
-# DATA LOADING FROM CSV
+# DATA LOADING (FROM TXT FILES)
 # ============================
 @st.cache_resource
-def load_corpus_from_csv(csv_path):
-    """Load all papers from CSV and create necessary data structures."""
+def load_corpus_from_folder(folder_path):
+    """Load all .txt files from the folder and create data structures."""
     
     network = CoAuthorshipNetwork()
     papers = []
     author_paper_map = defaultdict(list)
     all_authors = set()
     
-    if not os.path.exists(csv_path):
-        # We handle this error in main, but double check here
+    # Check if folder exists
+    if not os.path.exists(folder_path):
+        st.error(f"❌ Error: Folder not found at: {folder_path}")
         return None, None, None, None, None
     
-    try:
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-    except Exception as e:
-        st.error(f"❌ Error reading CSV file: {e}")
+    # Get all .txt files
+    txt_files = [f for f in os.listdir(folder_path) if f.endswith('.txt')]
+    
+    if not txt_files:
+        st.error(f"❌ No .txt files found inside '{folder_path}'")
         return None, None, None, None, None
 
-    # Ensure required columns exist
-    required_cols = ['text_content', 'paper_id', 'folder_owner']
-    if not all(col in df.columns for col in required_cols):
-        st.error(f"❌ CSV file must contain columns: {required_cols}")
-        st.info(f"Found columns: {list(df.columns)}")
-        return None, None, None, None, None
-
-    # Initialize CoAuthorExtractor for extracting authors from text
+    # Initialize CoAuthorExtractor
     extractor = CoAuthorExtractor()
     
-    for paper_idx, row in df.iterrows():
+    for paper_idx, filename in enumerate(txt_files):
         try:
-            text = row['text_content']
-            paper_id = str(row['paper_id'])
-            folder_owner = str(row['folder_owner']).strip()
+            # 1. Read content
+            file_path = os.path.join(folder_path, filename)
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
             
-            # Skip if text is missing or empty
-            if pd.isna(text) or not str(text).strip():
+            if not text.strip():
                 continue
-            
-            text = str(text)
-            
-            # Extract authors from the text content
+
+            # 2. Parse Metadata from Filename
+            # Logic: "Amit Saxena_Title_clean.txt" -> Owner is "Amit Saxena"
+            parts = filename.split('_')
+            folder_owner = parts[0].strip() if len(parts) > 0 else "Unknown"
+            paper_id = str(paper_idx)
+
+            # 3. Extract authors from text
             extracted_authors = extractor.extract_authors(text)
             
             # Use folder_owner as primary author if no authors extracted
@@ -265,17 +263,17 @@ def load_corpus_from_csv(csv_path):
             network.add_paper(paper_id, authors_list)
 
         except Exception as e:
-            st.warning(f"⚠️ Skipped row {paper_idx} due to data error: {e}")
+            st.warning(f"⚠️ Error reading file {filename}: {e}")
             continue
 
     if not papers:
-        st.error("❌ No valid papers found in CSV file!")
+        st.error("❌ No valid papers processed!")
         return None, None, None, None, None
 
     corpus_texts = [p['text'] for p in papers]
     unique_authors = sorted(list(all_authors))
     
-    st.info(f"📊 Loaded {len(papers)} papers with {len(unique_authors)} unique authors")
+    st.info(f"📊 Loaded {len(papers)} papers from '{folder_path}' with {len(unique_authors)} unique authors")
     
     return unique_authors, corpus_texts, author_paper_map, papers, network
 
@@ -469,30 +467,20 @@ def main():
     st.markdown('<div class="main-header">📚 Reviewer Recommendation System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">AI-Powered Paper Review Matching with Co-Author Network Analysis</div>', unsafe_allow_html=True)
     
-    # --- SMART PATH DETECTION ---
-    # This logic automatically finds the CSV whether it's in the root OR inside 'folder/'
+    # --- SMART FOLDER DETECTION ---
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Potential paths
-    path_option_1 = os.path.join(current_dir, "corpus_index.csv")           # Root
-    path_option_2 = os.path.join(current_dir, "folder", "corpus_index.csv") # Inside folder/
+    # We look for a folder named 'folder' in the current directory
+    folder_path = os.path.join(current_dir, "folder")
     
-    # Logic to select the valid path
-    if os.path.exists(path_option_1):
-        detected_csv_path = path_option_1
-    elif os.path.exists(path_option_2):
-        detected_csv_path = path_option_2
-    else:
-        # Fallback (will trigger error later if not found)
-        detected_csv_path = "folder/corpus_index.csv" 
-
     # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        if os.path.exists(detected_csv_path):
-            with st.spinner(f"⏳ Loading data and initializing models..."):
+        if os.path.exists(folder_path):
+            with st.spinner(f"⏳ Reading text files from '{folder_path}'..."):
                 try:
+                    # NEW FUNCTION: Reads .txt files directly
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
-                        load_corpus_from_csv(detected_csv_path)
+                        load_corpus_from_folder(folder_path)
                     
                     if unique_authors is None:
                         st.stop()
@@ -516,13 +504,12 @@ def main():
                     st.success(f"✅ System ready! Loaded {len(papers)} papers from {len(unique_authors)} authors.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error processing CSV data or initializing models: {e}")
+                    st.error(f"❌ Error processing text files: {e}")
                     import traceback
                     st.code(traceback.format_exc())
                     st.stop()
         else:
-            st.error(f"❌ Corpus CSV file not found!")
-            st.info(f"💡 The system looked for the file here:\n1. {path_option_1}\n2. {path_option_2}")
+            st.error(f"❌ Folder not found at: {folder_path}")
             st.write("Current Working Directory:", os.getcwd())
             st.write("Files in Current Directory:", os.listdir())
             st.stop()
