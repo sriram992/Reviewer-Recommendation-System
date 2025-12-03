@@ -508,30 +508,34 @@ def main():
             st.info("📁 Expected file format: `AuthorName_PaperTitle_clean.txt`")
             st.stop()
     
-    # Display statistics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-        <div class="metric-container">
-            <div class="metric-value">{len(st.session_state.papers)}</div>
-            <div class="metric-label">Total Papers</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div class="metric-container">
-            <div class="metric-value">{len(st.session_state.unique_authors)}</div>
-            <div class="metric-label">Total Authors</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        avg_authors = np.mean([len(p['authors']) for p in st.session_state.papers])
-        st.markdown(f"""
-        <div class="metric-container">
-            <div class="metric-value">{avg_authors:.1f}</div>
-            <div class="metric-label">Avg Authors/Paper</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Display statistics (only if data is loaded)
+    if 'data_loaded' in st.session_state and st.session_state.data_loaded:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"""
+            <div class="metric-container">
+                <div class="metric-value">{len(st.session_state.papers)}</div>
+                <div class="metric-label">Total Papers</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class="metric-container">
+                <div class="metric-value">{len(st.session_state.unique_authors)}</div>
+                <div class="metric-label">Total Authors</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col3:
+            avg_authors = np.mean([len(p['authors']) for p in st.session_state.papers])
+            st.markdown(f"""
+            <div class="metric-container">
+                <div class="metric-value">{avg_authors:.1f}</div>
+                <div class="metric-label">Avg Authors/Paper</div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.error("❌ Data not loaded. Please check the folder path and refresh the page.")
+        st.stop()  # Stop execution if data isn't loaded
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -570,8 +574,12 @@ def main():
                     extractor = CoAuthorExtractor()
                     paper_authors = extractor.extract_authors(text)
                     
-                    # Update boost setting
-                    st.session_state.recommender.use_coauthor_boost = use_boost
+                    # Update boost setting (check if recommender exists)
+                    if 'recommender' in st.session_state:
+                        st.session_state.recommender.use_coauthor_boost = use_boost
+                    else:
+                        st.error("❌ System not initialized. Please refresh the page.")
+                        return
                     
                     # Show detected authors
                     if paper_authors:
