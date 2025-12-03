@@ -6,3 +6,6 @@ sentence-transformers
 torch
 pymupdf
 spacy
+transformers
+huggingface-hub
+
