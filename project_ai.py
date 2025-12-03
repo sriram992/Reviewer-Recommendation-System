@@ -99,8 +99,6 @@ st.markdown("""
 # ============================
 SBERT_MODEL_NAME = "all-MiniLM-L6-v2"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-# 🚨 UPDATED PATH: CSV file path
-CSV_PATH = "folder/corpus_index.csv"
 
 # ============================
 # CO-AUTHOR EXTRACTION
@@ -203,7 +201,7 @@ def load_corpus_from_csv(csv_path):
     all_authors = set()
     
     if not os.path.exists(csv_path):
-        st.error(f"❌ Error: Corpus file not found at: {csv_path}")
+        # We handle this error in main, but double check here
         return None, None, None, None, None
     
     try:
@@ -236,7 +234,6 @@ def load_corpus_from_csv(csv_path):
             text = str(text)
             
             # Extract authors from the text content
-            # This will attempt to find author names in the paper text
             extracted_authors = extractor.extract_authors(text)
             
             # Use folder_owner as primary author if no authors extracted
@@ -437,9 +434,10 @@ def extract_text_from_file(uploaded_file):
             return ""
 
         # Common Cleaning Logic
-        text = text.lower()
-        text = re.sub(r'[^a-z0-9\s]', ' ', text)
-        text = re.sub(r'\s+', ' ', text).strip()
+        if text:
+            text = text.lower()
+            text = re.sub(r'[^a-z0-9\s]', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
         
         return text
 
@@ -471,13 +469,30 @@ def main():
     st.markdown('<div class="main-header">📚 Reviewer Recommendation System</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-header">AI-Powered Paper Review Matching with Co-Author Network Analysis</div>', unsafe_allow_html=True)
     
+    # --- SMART PATH DETECTION ---
+    # This logic automatically finds the CSV whether it's in the root OR inside 'folder/'
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Potential paths
+    path_option_1 = os.path.join(current_dir, "corpus_index.csv")           # Root
+    path_option_2 = os.path.join(current_dir, "folder", "corpus_index.csv") # Inside folder/
+    
+    # Logic to select the valid path
+    if os.path.exists(path_option_1):
+        detected_csv_path = path_option_1
+    elif os.path.exists(path_option_2):
+        detected_csv_path = path_option_2
+    else:
+        # Fallback (will trigger error later if not found)
+        detected_csv_path = "folder/corpus_index.csv" 
+
     # Initialize data on first load
     if 'data_loaded' not in st.session_state:
-        if os.path.exists(CSV_PATH):
-            with st.spinner(f"⏳ Loading data from {CSV_PATH} and initializing models..."):
+        if os.path.exists(detected_csv_path):
+            with st.spinner(f"⏳ Loading data and initializing models..."):
                 try:
                     unique_authors, corpus_texts, author_paper_map, papers, network = \
-                        load_corpus_from_csv(CSV_PATH)
+                        load_corpus_from_csv(detected_csv_path)
                     
                     if unique_authors is None:
                         st.stop()
@@ -506,8 +521,10 @@ def main():
                     st.code(traceback.format_exc())
                     st.stop()
         else:
-            st.error(f"❌ Corpus CSV file not found at: {CSV_PATH}")
-            st.info("💡 Please ensure the CSV file is present and update the CSV_PATH variable if necessary.")
+            st.error(f"❌ Corpus CSV file not found!")
+            st.info(f"💡 The system looked for the file here:\n1. {path_option_1}\n2. {path_option_2}")
+            st.write("Current Working Directory:", os.getcwd())
+            st.write("Files in Current Directory:", os.listdir())
             st.stop()
     
     # Display statistics
@@ -544,7 +561,6 @@ def main():
     with tab1:
         st.markdown('<div class="section-header">📤 Upload Paper for Review</div>', unsafe_allow_html=True)
         
-        # In main(), inside 'with tab1:'
         uploaded_file = st.file_uploader(
             "Drop your PDF or TXT file here or click to browse", 
             type=['pdf', 'txt'],  
@@ -566,7 +582,7 @@ def main():
                     text = extract_text_from_file(uploaded_file)
                     
                     if not text:
-                        st.error("❌ Could not extract text from PDF! Please ensure the PDF is readable.")
+                        st.error("❌ Could not extract text! Please ensure the file is readable.")
                         return
                     
                     # Extract authors
@@ -720,4 +736,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
